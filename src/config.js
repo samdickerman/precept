@@ -13,9 +13,9 @@ export default {
   },
 
   gdrive: {
-    appId: "502455185443",
-    clientId: "502455185443-gr19tpj2gornm205e35tsfj7aog0jbc8.apps.googleusercontent.com",
-    apiKey: process.env.VUE_APP_API_KEY || "AIzaSyAI4ZQxYiw8ggmPrRB1HnDMVSiJaZb7gVw"
+    appId: "880472811488",
+    clientId: "880472811488-1hm06rum32dj0g28hkcedfb6h456ll4l.apps.googleusercontent.com",
+    apiKey: process.env.VUE_APP_API_KEY || "AIzaSyCT-dDWWmNJawfBf-Lot471GGtQrYk1fMQ"
   }
 
 }
