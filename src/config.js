@@ -2,7 +2,7 @@
 export default {
 
   app: {
-    title: "Precept"
+    title: "Prosemirror GDrive"
   },
 
   ga: {
