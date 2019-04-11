@@ -6,10 +6,10 @@ export default {
   },
 
   ga: {
-    id: "UA-137691856-1"
+    id: "UA-77306155-4"
   },
   sentry: {
-    dsn: "https://58b5fa3daa1b42e490063d42192f4911@sentry.io/1431409"
+    dsn: "https://e4ef4a78cc9247b28b3d8e93bc9ddd87@sentry.io/1420968"
   },
 
   gdrive: {
