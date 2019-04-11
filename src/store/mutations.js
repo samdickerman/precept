@@ -34,5 +34,4 @@ export default {
   [SET_SNACKBAR_ERROR](state, error) {
     state.snackbar_error = error;
   },
-
 };

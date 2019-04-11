@@ -7,8 +7,9 @@ import { VListGroup, VDivider, VList } from 'vuetify/lib'
 
 import NavigationTile from './NavigationTile.vue'
 
-import { newDocument, openDocument } from '../core/docs'
+import { addinNavigationGroups } from '../../addins'
 
+import { newDocument, openDocument } from '../core/docs'
 
 import { mapGetters } from 'vuex'
 
@@ -22,7 +23,8 @@ export default {
 
   data () {
     return {
-      show_recent: true
+      show_recent: true,
+      navigation_groups: addinNavigationGroups()
     }
   },
 
@@ -51,7 +53,7 @@ export default {
 
   <v-list dense>
 
-    <NavigationTile path="/" icon="home" caption="Homer" />
+    <NavigationTile path="/" icon="home" caption="Home" />
 
     <v-divider />
 
@@ -74,6 +76,25 @@ export default {
     
     </v-list-group>
     <v-divider v-else />
+
+    <template v-for="group in navigation_groups">
+      
+      <v-list-group
+        :key="group.caption"
+        :value="group.expanded"
+        no-action=""
+      >
+        <template v-slot:activator>
+          <NavigationTile :icon="group.icon" :caption="group.caption" />
+        </template>
+        
+        <NavigationTile v-for="item in group.items" :key="item.path" :caption="item.caption" :path="item.path" />    
+      
+      </v-list-group>
+
+      <v-divider :key="group.caption + 'divider'" />
+
+    </template>
 
     <NavigationTile path="/settings/" icon="settings" caption="Settings" />
   

@@ -5,7 +5,7 @@ import _debounce from 'lodash/debounce'
 import ProsemirrorEditor from '../../prosemirror'
 
 import EditorToolbar from './EditorToolbar.vue'
-import EditorShareButton from './EditorShareButton.vue'
+import EditorActionButton from './EditorActionButton.vue'
 import EditorDocTitle from './EditorDocTitle.vue'
 import EditorSaveStatus from './EditorSaveStatus.vue'
 
@@ -23,6 +23,8 @@ import MenuTile from '../core/MenuTile'
 
 import dialog from '../core/dialog'
 
+import { addinActions, addinBehaviors } from '../../addins'
+
 import printJS from 'print-js'
 
 export default {
@@ -30,7 +32,7 @@ export default {
 
   components: {
     ProgressSpinner, ErrorPanel, 
-    EditorToolbar, EditorShareButton, EditorDocTitle, EditorSaveStatus,
+    EditorToolbar, EditorActionButton, EditorDocTitle, EditorSaveStatus,
     PopupMenu, MenuTile,
     EditorLinkDialog, EditorImageDialog
   },
@@ -58,7 +60,34 @@ export default {
       save_status: "clean",
 
       // load error
-      error: null
+      error: null,
+
+      // addin actions
+      addin_actions: addinActions(),
+
+      // addin behaviors
+      addin_behaviors: addinBehaviors()
+
+    }
+  },
+
+  computed: {
+    
+    button_actions() {
+      return this.filterActions('button');
+    },
+
+    menu_actions() {
+      return this.filterActions('menu');
+    },
+
+    is_editable() {
+      for (let i=0; i<this.addin_behaviors.length; i++) {
+        let behavior = this.addin_behaviors[i];
+        if (behavior.editable && !behavior.editable(this.doc.properties))
+          return false;
+      }
+      return true;
     }
   },
 
@@ -68,7 +97,7 @@ export default {
       .then(file => {
 
         // set doc info
-        this.doc = this.docInfo(file.metadata.name, file.metadata.headRevisionId);
+        this.doc = this.docInfo(file.metadata.name, file.metadata.headRevisionId, file.metadata.properties);
 
         // monitor and save editor changes (triggered by onUpdate hook installed below)
         this.driveSave = new DriveSave(
@@ -82,7 +111,7 @@ export default {
         this.syncHandler = docSyncHandler(
           this.doc_id,
           () => this.doc,
-          this.onSyncTitle,
+          this.onSyncMetadata,
           this.onSyncDoc,
           this.onSyncError
         );
@@ -90,9 +119,9 @@ export default {
         // initialize editor
         this.editor = new ProsemirrorEditor(this.$refs.prosemirror, {
           autoFocus: true,
-          editable: true,
           content: file.content,
           hooks: {
+            isEditable: () => this.is_editable,
             onUpdate: this.onEditorUpdate,
             onSelectionChanged: this.onEditorSelectionChanged,
             onEditLink: this.onEditLink,
@@ -128,7 +157,7 @@ export default {
       drive
         .renameFile(this.doc_id, value)
         .then(result => {
-          this.doc = this.docInfo(value, result.headRevisionId);
+          this.doc = this.docInfo(value, result.headRevisionId, this.doc.properties);
           drive.updateRecentDocs();
         })
         .catch(error => {
@@ -175,12 +204,12 @@ export default {
       this.syncManager.onDriveChanged(changes);
     },
 
-    onSyncTitle(title) {
-      this.doc.title = title;
+    onSyncMetadata(metadata) {
+      this.doc = this.docInfo(metadata.name, metadata.headRevisionId, metadata.properties);
     },
 
     onSyncDoc(doc) {
-      this.doc = this.docInfo(doc.metadata.name, doc.metadata.headRevisionId);
+      this.doc = this.docInfo(doc.metadata.name, doc.metadata.headRevisionId, doc.metadata.properties);
       this.editor.setContent(doc.content);
     },
 
@@ -201,23 +230,43 @@ export default {
       });
     },
 
-    onPublishAsGoogleDoc() {
-      drive.convertToGoogleDoc(this.doc.title, this.editor.getHTML())
-        .then(response => {
-          let id = response.id
-          window.open(`https://docs.google.com/document/d/${id}/edit`, "_blank");
-        })
-        .catch(error => {
-          dialog.errorSnackbar("Unable to Publish as Google Doc: " + error.message);
-        });
-    },
-
-    docInfo(title = null, headRevisionId = null) {
+    docInfo(title = null, headRevisionId = null, properties = null) {
       return {
-        title: title,
-        headRevisionId: headRevisionId
+        title,
+        headRevisionId,
+        properties: properties || {}
       }
     },
+
+    onEditorAction(handler) {
+      handler({
+        id: this.doc_id,
+        properties: this.doc.properties,
+        setProperties: (properties) => {
+          drive
+            .setFileProperties(this.doc_id, properties)
+            .then(() => {
+              this.doc.properties = {
+                ...this.doc.properties,
+                ...properties
+              }
+            })
+            .catch(error => {
+              dialog.errorSnackbar("Error setting file properties: " + 
+                                    error.message);
+            })
+        }
+      });
+    },
+
+    filterActions(type) { 
+      // get all of the actions of this type
+      let actions = this.addin_actions.filter(action => action.type === type);
+      
+      // apply the property filter
+      let properties = this.doc.properties || {};
+      return actions.filter(action => !action.filter || action.filter(properties));
+    }
   }
 }
 
@@ -240,19 +289,33 @@ export default {
   
           <EditorSaveStatus :status="save_status" />
 
-          <EditorShareButton :doc_id="doc_id" />
+          <span>
+            <EditorActionButton 
+              v-for="action in button_actions" 
+              :key="action.caption"
+              :icon="action.icon" 
+              :caption="action.caption" 
+              @clicked="onEditorAction(action.handler)" 
+            />
+          </span>
           
           <PopupMenu>
-            <MenuTile icon="print" text="Print Document..." @clicked="onPrintDocument" />
+            <MenuTile
+              v-for="action in menu_actions"
+              :key="action.caption" 
+              :icon="action.icon" 
+              :text="action.caption" 
+              @clicked="onEditorAction(action.handler)" 
+            />
             <v-divider />
-            <MenuTile icon="insert_drive_file" text="Publish as Google Doc" @clicked="onPublishAsGoogleDoc" />
+            <MenuTile icon="print" text="Print Document..." @clicked="onPrintDocument" />
           </PopupMenu>
           
         </v-toolbar>
 
         <v-divider />
 
-        <v-card-text id="prosemirror" ref="prosemirror" />
+        <div id="prosemirror" ref="prosemirror" />
         
       </v-card>
     </div>
@@ -306,19 +369,21 @@ export default {
   text-transform: none;
 }
 
-.edit-container .v-card__text {
+.edit-container .editor-save-status {
+  margin-right: 5px;
+}
+
+.edit-container #prosemirror {
   padding: 12px;
   position: absolute;
   top: 65px;
   left: 0;
   bottom: 0;
   right: 0;
-  overflow-y: scroll
+  overflow-y: scroll;
+  width: inherit;
 }
 
-.edit-container .editor-save-status {
-  margin-right: 5px;
-}
 
 .edit-container .ProseMirror {
   outline: none;

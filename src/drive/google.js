@@ -16,7 +16,7 @@ const kScopes = [
 ];
 
 const kFileFields = 'id, name, headRevisionId, iconLink, viewedByMe, viewedByMeTime, ' +
-                    'sharedWithMeTime, modifiedTime, shared, sharingUser, size, appProperties';
+                    'sharedWithMeTime, modifiedTime, shared, sharingUser, size, properties, appProperties';
 
 const kFileListFields = 'nextPageToken, files(' + kFileFields + ')';
 
@@ -127,10 +127,24 @@ export default {
     auth().signOut();
   },
 
-  listFiles(orderBy = 'lastViewed', descending = true, search = null, limit = 1000) {
+  // properties is a string that uses the syntax described here:
+  //  https://developers.google.com/drive/api/v3/search-parameters#properties
+  // for example:
+  //  properties has { key='foo' and value='bar' } 
+  listFiles(options) {
+
+    // provide defaults
+    options = {
+      orderBy: 'lastViewed',
+      descending: true,
+      search: null,
+      properties: null,
+      limit: 1000,
+      ...options
+    }
 
     // adjust order by to cannonical names
-    let orderByQuery = orderBy;
+    let orderByQuery = options.orderBy;
     if (orderByQuery === 'lastViewed')
       orderByQuery = 'viewedByMeTime';
     else if (orderByQuery === 'size')
@@ -138,28 +152,31 @@ export default {
       
     // build query
     let query = `appProperties has { key="appId" and value="${config.gdrive.appId}" } and trashed = false`
-    if (search) {
-      query = query + " and fullText contains '" + search.replace("'", "\\'") + "'";  
+    if (options.properties) {
+      query = query + " and (" + options.properties + ") "
+    }
+    if (options.search) {
+      query = query + " and fullText contains '" + options.search.replace("'", "\\'") + "'";  
     }
 
     // build params
     let params = {
       q: query,
-      pageSize: limit,
+      pageSize: options.limit,
       fields: kFileListFields
     };
 
     // add orderBy if this isn't a search
-    if (orderBy && !search)
-      params.orderBy = orderByQuery + (descending ? ' desc' : '');
+    if (options.orderBy && !options.search)
+      params.orderBy = orderByQuery + (options.descending ? ' desc' : '');
 
     // perform query
     return gapi.client.drive.files.list(params)
       .then(fileListResponse)
       .then(files => {
         // do client side sorting if this was a search
-        if (orderBy && search) 
-          return _orderBy(files, [orderBy], [descending ? 'desc' : 'asc']);
+        if (options.orderBy && options.search) 
+          return _orderBy(files, [options.orderBy], [options.descending ? 'desc' : 'asc']);
         else
           return files;
       })
@@ -168,12 +185,15 @@ export default {
       }); 
   },
 
-  newFile(title) {
+  newFile(title, properties) {
     let metadata = {
       name: title,
       mimeType: 'text/html; charset=UTF-8',
       appProperties: {
-        appId: config.gdrive.appId
+        appId: config.gdrive.appId,
+      },
+      properties: {
+        ...properties
       }
     };
     let fileContent = ''; 
@@ -184,25 +204,29 @@ export default {
     let metadata = {
       id: fileId,
       mimeType: 'text/html; charset=UTF-8',
-      appProperties: {
-        appId: config.gdrive.appId
-      },
       viewedByMeTime: new Date().toISOString()
     }
-    return this._uploadFile(metadata, content);
-  },
-
-  convertToGoogleDoc(title, content) {
-    let metadata = {
-      name: title,
-      mimeType: 'application/vnd.google-apps.document'
-    };
     return this._uploadFile(metadata, content);
   },
 
   renameFile(fileId, name) {
     return this._uploadFileMetadata(fileId, { 
       name: name
+    });
+  },
+
+  setFileViewed(fileId) {
+    return this._uploadFileMetadata(fileId, { 
+      viewedByMeTime: new Date().toISOString()
+    })
+  },
+
+  // NOTE: limited to 30 properties, and each property 
+  // can use 124 bytes combined for key and value
+  // see: https://developers.google.com/drive/api/v3/properties
+  setFileProperties(fileId, properties) {
+    return this._uploadFileMetadata(fileId, { 
+      properties: properties
     });
   },
 
@@ -258,10 +282,15 @@ export default {
     });
   },
 
-  setFileViewed(fileId) {
-    return this._uploadFileMetadata(fileId, { 
-      viewedByMeTime: new Date().toISOString()
-    })
+  convertToGoogleDoc(fileId) {
+    return this.getFile(fileId)
+      .then(file => {
+        let metadata = {
+          name: file.metadata.name,
+          mimeType: 'application/vnd.google-apps.document'
+        };
+        return this._uploadFile(metadata, file.content);
+      });
   },
 
   readAppData(name, mimeType, defaultContent) {
@@ -350,7 +379,10 @@ export default {
 
   updateRecentDocs() {
     return this
-      .listFiles('recency', true, null, store.getters.settings.recent_documents)
+      .listFiles({
+        orderBy: 'recency', 
+        limit: store.getters.settings.recent_documents
+      })
       .then(files => {
         store.commit(SET_RECENT_DOCS, files);
       })
@@ -406,7 +438,7 @@ export default {
       method: method,
       params: {
         supportsTeamDrives: true,
-        fields: 'id,headRevisionId'
+        fields: 'id,properties,headRevisionId'
       },
       headers: { 'Content-Type' : "application/json; charset=UTF-8" },
       body: jsonStringifyEscaped(metadata)
@@ -436,7 +468,7 @@ export default {
       params: {
         uploadType: 'multipart',
         supportsTeamDrives: true,
-        fields: 'id,headRevisionId'
+        fields: 'id,properties,headRevisionId'
       },
       headers: { 'Content-Type' : multipart.type },
       body: multipart.body
